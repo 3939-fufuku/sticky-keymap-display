@@ -30,6 +30,8 @@ const ble_uuid128_t kLayerCharacteristicUuid = BLE_UUID128_INIT(
     0x00, 0x1a, 0x5b, 0x3c, 0x7e, 0x6e, 0x61, 0x9a,
     0x2c, 0x4f, 0x8b, 0x7d, 0x11, 0x9f, 0x7d, 0x3a);
 
+const ble_uuid16_t kCccdUuid = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
+
 ZmkBleLayerSource *s_source = nullptr;
 uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 uint16_t s_service_start = 0;
@@ -142,7 +144,7 @@ int on_descriptor(uint16_t conn_handle, const ble_gatt_error *error,
     (void)chr_val_handle;
     (void)arg;
     if (error->status == 0 && dsc != nullptr &&
-        ble_uuid_cmp(&dsc->uuid.u, BLE_UUID16_DECLARE(BLE_GATT_DSC_CLT_CFG_UUID16)) == 0) {
+        ble_uuid_cmp(&dsc->uuid.u, &kCccdUuid.u) == 0) {
         const uint8_t enable_notify[2] = {1, 0};
         const int rc = ble_gattc_write_flat(conn_handle, dsc->handle,
                                             enable_notify, sizeof(enable_notify),
@@ -398,4 +400,3 @@ void ZmkBleLayerSource::handle_layer(uint8_t layer)
     current_layer_ = layer;
     if (callback_ != nullptr) callback_(layer, context_);
 }
-

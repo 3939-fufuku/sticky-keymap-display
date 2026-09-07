@@ -1,0 +1,52 @@
+name: Build Sticky Firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ESP-IDF 5.4
+        uses: espressif/install-esp-idf-action@v1
+        with:
+          version: v5.4.4
+
+      - name: Validate sample keymaps
+        run: python3 tools/validate_keymaps.py sample-keymaps
+
+      - name: Select ESP32-S3
+        run: idf.py set-target esp32s3
+
+      - name: Build firmware
+        run: idf.py build
+
+      - name: Create merged.bin
+        run: |
+          esptool.py --chip esp32s3 merge_bin \
+            -o build/merged.bin \
+            @build/flash_args
+
+      - name: Upload firmware files
+        uses: actions/upload-artifact@v4
+        with:
+          name: sticky-keymap-firmware
+          if-no-files-found: error
+          path: |
+            build/merged.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/sticky_keymap_display.bin
+            build/flasher_args.json
+            build/flash_args

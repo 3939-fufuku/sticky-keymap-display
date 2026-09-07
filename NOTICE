@@ -1,0 +1,6 @@
+This project contains files derived from Seeed Studio's Sticky_dashboard_demo.
+See UPSTREAM.md for the exact source archive and digest. Upstream-derived files
+and bundled third-party components remain subject to their original terms.
+
+The MIT license in LICENSE applies to the newly written integration code in
+this package to the extent the contributor is able to license it.

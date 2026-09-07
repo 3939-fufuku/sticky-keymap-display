@@ -1,0 +1,5 @@
+dependencies:
+  espressif/cmake_utilities:
+    version: '0.*'
+  espressif/libpng:
+    version: '^1.6.52'

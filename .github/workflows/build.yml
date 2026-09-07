@@ -34,9 +34,10 @@ jobs:
 
       - name: Create merged.bin
         run: |
+          cd build
           esptool.py --chip esp32s3 merge_bin \
-            -o build/merged.bin \
-            @build/flash_args
+            -o merged.bin \
+            @flash_args
 
       - name: Upload firmware files
         uses: actions/upload-artifact@v4

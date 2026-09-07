@@ -16,7 +16,7 @@ main/
 │   ├── app_event.*              ボタン/BLEから表示処理へのイベント境界
 │   └── layer_source.h           レイヤー通知元の抽象インターフェース
 ├── data_sources/
-│   ├── ble_layer_source_stub.*  将来のZMK BLE実装との交換点
+│   ├── zmk_ble_layer_source.*   Nickey44のBLE通知を受信
 │   ├── png_decoder.*            libpng → 4階調Canvas
 │   └── sd_keymap_source.*       layer_<n>.pngの取得
 ├── devices/                     公式デモ由来の実機ドライバー
@@ -58,11 +58,17 @@ esptool.py --chip esp32s3 -p PORT write_flash 0x0 build/merged.bin
 
 `.github/workflows/build.yml` はpush、Pull Request、手動実行でESP-IDF v5.4.4を使ってビルドします。成功後、Actions実行画面のArtifactsから `sticky-keymap-firmware` をダウンロードできます。中には `merged.bin`、個別bin、`flasher_args.json`、`flash_args` が含まれます。
 
-## ZMK BLEレイヤー通知を追加する場所
+## Nickey44とのBLE接続
 
-現在の `BleLayerSourceStub` は通信を行わず、ボタン操作だけを有効にします。BLEを追加するときは `LayerSource` を実装するクラス（例: `ZmkBleLayerSource`）を `main/data_sources/` に追加し、通知で得たレイヤー番号を登録済みコールバックへ渡します。その後 `main.cpp` の生成クラスを差し替え、必要なNimBLE依存を `main/CMakeLists.txt` と `sdkconfig.defaults` へ追加します。
+起動後、NimBLE centralがデバイス名 `nickey` を検索して接続します。接続はJust Works方式で暗号化・ボンディングされ、次のカスタムGATT CharacteristicをRead/Notify購読します。
 
-この境界により、GATT UUIDやZMK側通知方式が変わっても、PNG、microSD、ページ、表示ドライバーは変更不要です。なお、ZMK標準HIDだけではアクティブレイヤー番号は通知されないため、ZMK側にも専用GATTサービス等の実装が必要です。
+- Service: `3a7d9f10-7d8b-4f2c-9a61-6e7e3c5b1a00`
+- Characteristic: `3a7d9f11-7d8b-4f2c-9a61-6e7e3c5b1a00`
+- Payload: アクティブレイヤー番号を表す符号なし1バイト
+
+通知を受けると `layer_<番号>.png` を表示します。切断時は自動的にスキャンへ戻ります。BLE接続前やトラブル時も本体ボタンで手動切替できます。
+
+> ZMK v0.3.0は通常、アクティブなBLEプロファイル1台へ接続します。Nickey44をPCへBLE接続中はStickyが同時接続できない場合があります。まずPC側Bluetoothを切ってStickyとの接続・通知を確認してください。PCとStickyの完全同時利用には、今後Nickey側を接続不要の広告通知方式へ変更する必要があります。
 
 ## 検証
 
@@ -72,7 +78,7 @@ esptool.py --chip esp32s3 -p PORT write_flash 0x0 build/merged.bin
 python3 tools/validate_keymaps.py sample-keymaps
 ```
 
-CIはこの検証後にファームウェアをビルドし、merged.binを生成します。本パッケージ作成時にはソース一覧・スクリプト・サンプルPNGのローカル検査まで実施しています。最終コンパイルはGitHub Actionsで確認してください。実機でのE-Ink表示・microSDカード相性・BLE（未実装）は別途確認が必要です。
+CIはこの検証後にファームウェアをビルドし、merged.binを生成します。本パッケージ作成時にはソース一覧・スクリプト・サンプルPNGのローカル検査まで実施しています。最終コンパイルはGitHub Actionsで確認してください。実機でのE-Ink表示・microSDカード相性・Nickey44とのBLE接続は別途確認が必要です。
 
 ## ライセンスと由来
 

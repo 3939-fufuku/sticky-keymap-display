@@ -1,7 +1,6 @@
 #include <cstdint>
 
 #include "app_event.h"
-#include "ble_layer_source_stub.h"
 #include "board.h"
 #include "canvas.h"
 #include "esp_log.h"
@@ -9,6 +8,7 @@
 #include "sticky_buttons.h"
 #include "sticky_display.h"
 #include "sticky_sdcard.h"
+#include "zmk_ble_layer_source.h"
 
 namespace {
 constexpr char kTag[] = "sticky_keymap";
@@ -43,7 +43,7 @@ extern "C" void app_main()
     Canvas *canvas = sticky_display_canvas();
     ESP_ERROR_CHECK(canvas != nullptr ? ESP_OK : ESP_ERR_INVALID_STATE);
 
-    BleLayerSourceStub layer_source;
+    ZmkBleLayerSource layer_source;
     ESP_ERROR_CHECK(layer_source.start(layer_changed, nullptr));
     uint8_t current_layer = layer_source.initial_layer();
     show_layer(*canvas, current_layer);
@@ -64,11 +64,14 @@ extern "C" void app_main()
                 show_layer(*canvas, current_layer);
                 break;
             case AppEventType::LayerChanged:
-                current_layer = event.layer;
-                show_layer(*canvas, current_layer);
+                if (event.layer <= kMaxLayer && event.layer != current_layer) {
+                    current_layer = event.layer;
+                    show_layer(*canvas, current_layer);
+                }
                 break;
             default:
                 break;
         }
     }
 }
+

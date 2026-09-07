@@ -3,7 +3,7 @@ idf_component_register(
         "main.cpp"
         "app/app_event.cpp"
         "board/board.cpp"
-        "data_sources/ble_layer_source_stub.cpp"
+        "data_sources/zmk_ble_layer_source.cpp"
         "data_sources/png_decoder.cpp"
         "data_sources/sd_keymap_source.cpp"
         "devices/sticky_buttons.cpp"
@@ -14,6 +14,8 @@ idf_component_register(
         "ui/font.cpp"
     INCLUDE_DIRS "." "app" "board" "data_sources" "devices" "pages" "ui"
     REQUIRES
+        bt nvs_flash
         esp_driver_gpio esp_driver_i2c esp_driver_spi esp_hw_support
         button fatfs libpng sdmmc seeed_epaper
 )
+

@@ -19,6 +19,7 @@ namespace {
 constexpr char kTag[] = "sticky_sdcard";
 constexpr char kMountPoint[] = "/sdcard";
 constexpr TickType_t kPowerOnDelay = pdMS_TO_TICKS(100);
+constexpr TickType_t kPowerOffDelay = pdMS_TO_TICKS(20);
 
 bool s_initialized = false;
 sdmmc_card_t *s_card = nullptr;
@@ -27,6 +28,32 @@ esp_err_t set_card_power(bool enabled)
 {
     return gpio_set_level(
         static_cast<gpio_num_t>(PIN_SD_EN), enabled ? 1 : 0);
+}
+
+esp_err_t restore_shared_spi_idle()
+{
+    // esp_vfs_fat_sdcard_unmount() removes the SDSPI device and leaves its CS
+    // pin configured as an input.  With a card inserted, a floating CS can let
+    // the card react to the following e-paper transactions on the shared bus.
+    // Power the card down, then explicitly drive CS high before the display
+    // takes ownership of SPI2 again.
+    esp_err_t result = set_card_power(false);
+    if (result != ESP_OK) {
+        return result;
+    }
+    vTaskDelay(kPowerOffDelay);
+
+    gpio_config_t cs_config = {};
+    cs_config.pin_bit_mask = 1ULL << PIN_SD_CS;
+    cs_config.mode = GPIO_MODE_OUTPUT;
+    cs_config.pull_up_en = GPIO_PULLUP_DISABLE;
+    cs_config.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    cs_config.intr_type = GPIO_INTR_DISABLE;
+    result = gpio_config(&cs_config);
+    if (result != ESP_OK) {
+        return result;
+    }
+    return gpio_set_level(static_cast<gpio_num_t>(PIN_SD_CS), 1);
 }
 
 bool card_is_inserted()
@@ -150,10 +177,7 @@ esp_err_t sticky_sdcard_read_text(const char *file_name,
         kMountPoint, &host, &slot_config, &mount_config, &card);
     if (result != ESP_OK) {
         ESP_LOGE(kTag, "MicroSD mount failed: %s", esp_err_to_name(result));
-        gpio_set_level(static_cast<gpio_num_t>(PIN_SD_CS), 1);
-        if (!card_is_inserted()) {
-            set_card_power(false);
-        }
+        restore_shared_spi_idle();
         return result;
     }
 
@@ -172,9 +196,9 @@ esp_err_t sticky_sdcard_read_text(const char *file_name,
         result = unmount_result;
     }
 
-    gpio_set_level(static_cast<gpio_num_t>(PIN_SD_CS), 1);
-    if (!card_is_inserted()) {
-        set_card_power(false);
+    const esp_err_t idle_result = restore_shared_spi_idle();
+    if (result == ESP_OK && idle_result != ESP_OK) {
+        result = idle_result;
     }
     ESP_LOGI(kTag, "MicroSD unmounted; shared SPI2 is ready for display refresh");
     return result;
@@ -216,8 +240,7 @@ esp_err_t sticky_sdcard_mount()
         kMountPoint, &host, &slot_config, &mount_config, &s_card);
     if (result != ESP_OK) {
         s_card = nullptr;
-        gpio_set_level(static_cast<gpio_num_t>(PIN_SD_CS), 1);
-        set_card_power(false);
+        restore_shared_spi_idle();
     }
     return result;
 }
@@ -229,9 +252,8 @@ esp_err_t sticky_sdcard_unmount()
     }
     const esp_err_t result = esp_vfs_fat_sdcard_unmount(kMountPoint, s_card);
     s_card = nullptr;
-    gpio_set_level(static_cast<gpio_num_t>(PIN_SD_CS), 1);
-    set_card_power(false);
-    return result;
+    const esp_err_t idle_result = restore_shared_spi_idle();
+    return result == ESP_OK ? idle_result : result;
 }
 
 const char *sticky_sdcard_mount_point()

@@ -37,6 +37,7 @@ uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 uint16_t s_service_start = 0;
 uint16_t s_service_end = 0;
 uint16_t s_layer_value_handle = 0;
+uint16_t s_cccd_handle = 0;
 bool s_connecting = false;
 
 int gap_event(struct ble_gap_event *event, void *arg);
@@ -47,6 +48,7 @@ void reset_gatt_state()
     s_service_start = 0;
     s_service_end = 0;
     s_layer_value_handle = 0;
+    s_cccd_handle = 0;
     s_connecting = false;
 }
 
@@ -145,8 +147,9 @@ int on_descriptor(uint16_t conn_handle, const ble_gatt_error *error,
     (void)arg;
     if (error->status == 0 && dsc != nullptr &&
         ble_uuid_cmp(&dsc->uuid.u, &kCccdUuid.u) == 0) {
+        s_cccd_handle = dsc->handle;
         const uint8_t enable_notify[2] = {1, 0};
-        const int rc = ble_gattc_write_flat(conn_handle, dsc->handle,
+        const int rc = ble_gattc_write_flat(conn_handle, s_cccd_handle,
                                             enable_notify, sizeof(enable_notify),
                                             on_cccd_written, nullptr);
         if (rc != 0) {
@@ -156,7 +159,11 @@ int on_descriptor(uint16_t conn_handle, const ble_gatt_error *error,
     }
 
     if (error->status == BLE_HS_EDONE) {
-        disconnect_with_error("CCCD discovery", BLE_HS_ENOENT);
+        // Discovery always finishes with BLE_HS_EDONE, including after the
+        // matching CCCD has already been reported and its write has started.
+        if (s_cccd_handle == 0) {
+            disconnect_with_error("CCCD discovery", BLE_HS_ENOENT);
+        }
     } else if (error->status != 0) {
         disconnect_with_error("Descriptor discovery", error->status);
     }
@@ -180,7 +187,13 @@ int on_characteristic(uint16_t conn_handle, const ble_gatt_error *error,
     }
 
     if (error->status == BLE_HS_EDONE) {
-        disconnect_with_error("Layer characteristic discovery", BLE_HS_ENOENT);
+        // The characteristic callback is followed by BLE_HS_EDONE.  Descriptor
+        // discovery may already be in flight at that point; do not tear down
+        // the valid connection.
+        if (s_layer_value_handle == 0) {
+            disconnect_with_error("Layer characteristic discovery",
+                                  BLE_HS_ENOENT);
+        }
     } else if (error->status != 0) {
         disconnect_with_error("Characteristic discovery", error->status);
     }

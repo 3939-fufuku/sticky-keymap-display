@@ -12,7 +12,7 @@
 
 namespace {
 constexpr char kTag[] = "sticky_keymap";
-constexpr uint8_t kMaxLayer = 9;
+constexpr uint8_t kMaxLayer = 3;
 
 void layer_changed(uint8_t layer, void *context)
 {
@@ -74,4 +74,3 @@ extern "C" void app_main()
         }
     }
 }
-

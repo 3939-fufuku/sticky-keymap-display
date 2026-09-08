@@ -7,6 +7,7 @@ idf_component_register(
         "data_sources/png_decoder.cpp"
         "data_sources/sd_keymap_source.cpp"
         "devices/sticky_buttons.cpp"
+        "devices/sticky_battery.cpp"
         "devices/sticky_display.cpp"
         "devices/sticky_sdcard.cpp"
         "pages/keymap_page.cpp"
@@ -18,4 +19,3 @@ idf_component_register(
         esp_driver_gpio esp_driver_i2c esp_driver_spi esp_hw_support
         button fatfs libpng sdmmc seeed_epaper
 )
-

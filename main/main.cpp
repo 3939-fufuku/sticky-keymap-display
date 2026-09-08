@@ -22,7 +22,8 @@ void layer_changed(uint8_t layer, void *context)
     app_event_post_layer(layer);
 }
 
-void show_layer(Canvas &canvas, uint8_t layer, int nickey_battery)
+void show_layer(Canvas &canvas, uint8_t layer, int left_battery,
+                int right_battery)
 {
     const esp_err_t load_result = keymap_page_render(canvas, layer);
     if (load_result != ESP_OK) {
@@ -31,17 +32,24 @@ void show_layer(Canvas &canvas, uint8_t layer, int nickey_battery)
     }
     int sticky_battery = -1;
     sticky_battery_read_percent(sticky_battery);
-    char status[32] = {};
-    if (nickey_battery >= 0) {
-        std::snprintf(status, sizeof(status), "STK:%d%% NKY:%d%%",
-                      sticky_battery, nickey_battery);
-    } else {
-        std::snprintf(status, sizeof(status), "STK:%d%% NKY:--",
-                      sticky_battery);
+    char sticky_text[8] = "--";
+    char left_text[8] = "--";
+    char right_text[8] = "--";
+    if (sticky_battery >= 0) {
+        std::snprintf(sticky_text, sizeof(sticky_text), "%d%%", sticky_battery);
     }
-    canvas.fill_rect(520, 8, 272, 30, GrayLevel::White);
-    canvas.draw_rect(520, 8, 272, 30, GrayLevel::Black);
-    canvas.draw_text(532, 16, status, 2);
+    if (left_battery >= 0) {
+        std::snprintf(left_text, sizeof(left_text), "%d%%", left_battery);
+    }
+    if (right_battery >= 0) {
+        std::snprintf(right_text, sizeof(right_text), "%d%%", right_battery);
+    }
+    char status[40] = {};
+    std::snprintf(status, sizeof(status), "STK:%s L:%s R:%s",
+                  sticky_text, left_text, right_text);
+    canvas.fill_rect(488, 8, 304, 30, GrayLevel::White);
+    canvas.draw_rect(488, 8, 304, 30, GrayLevel::Black);
+    canvas.draw_text(500, 16, status, 2);
     ESP_ERROR_CHECK(sticky_display_refresh());
 }
 }  // namespace
@@ -62,7 +70,8 @@ extern "C" void app_main()
     ZmkBleLayerSource layer_source;
     ESP_ERROR_CHECK(layer_source.start(layer_changed, nullptr));
     uint8_t current_layer = layer_source.initial_layer();
-    show_layer(*canvas, current_layer, layer_source.battery_percent());
+    show_layer(*canvas, current_layer, layer_source.left_battery_percent(),
+               layer_source.right_battery_percent());
 
     while (true) {
         AppEvent event;
@@ -70,19 +79,23 @@ extern "C" void app_main()
         switch (event.type) {
             case AppEventType::PreviousPage:
                 current_layer = current_layer == 0 ? kMaxLayer : current_layer - 1;
-                show_layer(*canvas, current_layer, layer_source.battery_percent());
+                show_layer(*canvas, current_layer, layer_source.left_battery_percent(),
+                           layer_source.right_battery_percent());
                 break;
             case AppEventType::NextPage:
                 current_layer = current_layer == kMaxLayer ? 0 : current_layer + 1;
-                show_layer(*canvas, current_layer, layer_source.battery_percent());
+                show_layer(*canvas, current_layer, layer_source.left_battery_percent(),
+                           layer_source.right_battery_percent());
                 break;
             case AppEventType::RefreshPage:
-                show_layer(*canvas, current_layer, layer_source.battery_percent());
+                show_layer(*canvas, current_layer, layer_source.left_battery_percent(),
+                           layer_source.right_battery_percent());
                 break;
             case AppEventType::LayerChanged:
                 if (event.layer <= kMaxLayer) {
                     current_layer = event.layer;
-                    show_layer(*canvas, current_layer, layer_source.battery_percent());
+                    show_layer(*canvas, current_layer, layer_source.left_battery_percent(),
+                               layer_source.right_battery_percent());
                 }
                 break;
             default:

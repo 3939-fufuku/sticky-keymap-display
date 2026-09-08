@@ -36,13 +36,16 @@ void show_layer(Canvas &canvas, uint8_t layer, int left_battery,
     char left_text[8] = "--";
     char right_text[8] = "--";
     if (sticky_battery >= 0) {
-        std::snprintf(sticky_text, sizeof(sticky_text), "%d%%", sticky_battery);
+        const uint8_t percent = static_cast<uint8_t>(sticky_battery > 100 ? 100 : sticky_battery);
+        std::snprintf(sticky_text, sizeof(sticky_text), "%u%%", percent);
     }
     if (left_battery >= 0) {
-        std::snprintf(left_text, sizeof(left_text), "%d%%", left_battery);
+        const uint8_t percent = static_cast<uint8_t>(left_battery > 100 ? 100 : left_battery);
+        std::snprintf(left_text, sizeof(left_text), "%u%%", percent);
     }
     if (right_battery >= 0) {
-        std::snprintf(right_text, sizeof(right_text), "%d%%", right_battery);
+        const uint8_t percent = static_cast<uint8_t>(right_battery > 100 ? 100 : right_battery);
+        std::snprintf(right_text, sizeof(right_text), "%u%%", percent);
     }
     char status[40] = {};
     std::snprintf(status, sizeof(status), "STK:%s L:%s R:%s",

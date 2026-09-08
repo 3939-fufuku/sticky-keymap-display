@@ -31,6 +31,8 @@ const ble_uuid128_t kLayerCharacteristicUuid = BLE_UUID128_INIT(
     0x2c, 0x4f, 0x8b, 0x7d, 0x11, 0x9f, 0x7d, 0x3a);
 
 const ble_uuid16_t kCccdUuid = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
+const ble_uuid16_t kBatteryServiceUuid = BLE_UUID16_INIT(0x180f);
+const ble_uuid16_t kBatteryLevelUuid = BLE_UUID16_INIT(0x2a19);
 
 ZmkBleLayerSource *s_source = nullptr;
 uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
@@ -38,9 +40,13 @@ uint16_t s_service_start = 0;
 uint16_t s_service_end = 0;
 uint16_t s_layer_value_handle = 0;
 uint16_t s_cccd_handle = 0;
+uint16_t s_battery_service_start = 0;
+uint16_t s_battery_service_end = 0;
+uint16_t s_battery_value_handle = 0;
 bool s_connecting = false;
 
 int gap_event(struct ble_gap_event *event, void *arg);
+void discover_battery_service(uint16_t conn_handle);
 
 void reset_gatt_state()
 {
@@ -49,6 +55,9 @@ void reset_gatt_state()
     s_service_end = 0;
     s_layer_value_handle = 0;
     s_cccd_handle = 0;
+    s_battery_service_start = 0;
+    s_battery_service_end = 0;
+    s_battery_value_handle = 0;
     s_connecting = false;
 }
 
@@ -101,6 +110,59 @@ void disconnect_with_error(const char *stage, int rc)
     }
 }
 
+int on_battery_read(uint16_t conn_handle, const ble_gatt_error *error,
+                    ble_gatt_attr *attr, void *arg)
+{
+    (void)conn_handle;
+    (void)arg;
+    if (error->status == 0 && attr != nullptr && attr->om != nullptr) {
+        uint8_t percent = 0;
+        if (os_mbuf_copydata(attr->om, 0, 1, &percent) == 0 && s_source != nullptr) {
+            ESP_LOGI(kTag, "Nickey battery: %u%%", percent);
+            s_source->handle_battery(percent);
+        }
+    }
+    return 0;
+}
+
+int on_battery_characteristic(uint16_t conn_handle, const ble_gatt_error *error,
+                              const ble_gatt_chr *chr, void *arg)
+{
+    (void)arg;
+    if (error->status == 0 && chr != nullptr) {
+        s_battery_value_handle = chr->val_handle;
+        const int rc = ble_gattc_read(conn_handle, s_battery_value_handle,
+                                      on_battery_read, nullptr);
+        if (rc != 0) ESP_LOGW(kTag, "Battery read start failed: %d", rc);
+    }
+    return 0;
+}
+
+int on_battery_service(uint16_t conn_handle, const ble_gatt_error *error,
+                       const ble_gatt_svc *service, void *arg)
+{
+    (void)arg;
+    if (error->status == 0 && service != nullptr) {
+        s_battery_service_start = service->start_handle;
+        s_battery_service_end = service->end_handle;
+        return 0;
+    }
+    if (error->status == BLE_HS_EDONE && s_battery_service_start != 0) {
+        const int rc = ble_gattc_disc_chrs_by_uuid(
+            conn_handle, s_battery_service_start, s_battery_service_end,
+            &kBatteryLevelUuid.u, on_battery_characteristic, nullptr);
+        if (rc != 0) ESP_LOGW(kTag, "Battery characteristic start failed: %d", rc);
+    }
+    return 0;
+}
+
+void discover_battery_service(uint16_t conn_handle)
+{
+    const int rc = ble_gattc_disc_svc_by_uuid(
+        conn_handle, &kBatteryServiceUuid.u, on_battery_service, nullptr);
+    if (rc != 0) ESP_LOGW(kTag, "Battery service start failed: %d", rc);
+}
+
 int on_layer_read(uint16_t conn_handle, const ble_gatt_error *error,
                   ble_gatt_attr *attr, void *arg)
 {
@@ -118,6 +180,7 @@ int on_layer_read(uint16_t conn_handle, const ble_gatt_error *error,
         ESP_LOGI(kTag, "Initial layer: %u", layer);
         s_source->handle_layer(layer);
     }
+    discover_battery_service(conn_handle);
     return 0;
 }
 
@@ -412,4 +475,10 @@ void ZmkBleLayerSource::handle_layer(uint8_t layer)
 
     current_layer_ = layer;
     if (callback_ != nullptr) callback_(layer, context_);
+}
+
+void ZmkBleLayerSource::handle_battery(uint8_t percent)
+{
+    battery_percent_ = percent > 100 ? 100 : percent;
+    if (callback_ != nullptr) callback_(current_layer_, context_);
 }

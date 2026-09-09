@@ -24,6 +24,27 @@ spi_device_handle_t s_spi_device = nullptr;
 uint8_t *s_framebuffer = nullptr;
 uint8_t *s_rotated_framebuffer = nullptr;
 Canvas *s_canvas = nullptr;
+bool s_sleeping = false;
+
+esp_err_t wake_panel(seeed_epaper_refresh_mode_t mode)
+{
+    if (!s_sleeping) {
+        return ESP_OK;
+    }
+
+    ESP_RETURN_ON_ERROR(
+        gpio_set_level(static_cast<gpio_num_t>(PIN_EPD_EN), 1),
+        "sticky_display", "enable display power");
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    const esp_err_t result = seeed_epaper_panel_wakeup(s_panel, mode);
+    if (result != ESP_OK) {
+        gpio_set_level(static_cast<gpio_num_t>(PIN_EPD_EN), 0);
+        return result;
+    }
+    s_sleeping = false;
+    return ESP_OK;
+}
 
 uint8_t reverse_pixel_order(uint8_t packed_pixels)
 {
@@ -152,6 +173,7 @@ esp_err_t sticky_display_init()
         return ESP_ERR_NO_MEM;
     }
     s_canvas->clear();
+    s_sleeping = false;
     return ESP_OK;
 }
 
@@ -166,16 +188,27 @@ esp_err_t sticky_display_refresh()
         return ESP_ERR_INVALID_STATE;
     }
 
+    ESP_RETURN_ON_ERROR(
+        wake_panel(SEEED_EPAPER_REFRESH_GRAY4),
+        "sticky_display", "wake display");
     rotate_framebuffer_180(s_canvas->data(), s_rotated_framebuffer);
 
     const seeed_epaper_area_t full_screen = {
         0, 0, kStickyDisplayWidth, kStickyDisplayHeight,
     };
-    ESP_RETURN_ON_ERROR(
+    esp_err_t result =
         seeed_epaper_panel_write_bitmap_gray4(
-            s_panel, &full_screen, s_rotated_framebuffer, s_canvas->stride()),
-        "sticky_display", "write gray4 framebuffer");
-    return seeed_epaper_panel_commit(s_panel, &full_screen, SEEED_EPAPER_REFRESH_GRAY4);
+            s_panel, &full_screen, s_rotated_framebuffer, s_canvas->stride());
+    if (result == ESP_OK) {
+        result = seeed_epaper_panel_commit(
+            s_panel, &full_screen, SEEED_EPAPER_REFRESH_GRAY4);
+    }
+
+    // E-paper retains the image without power. Shut the controller and its
+    // rail down after every completed update; wake_panel() restores it for the
+    // next layer change.
+    const esp_err_t sleep_result = sticky_display_sleep();
+    return result == ESP_OK ? sleep_result : result;
 }
 
 esp_err_t sticky_display_refresh_partial()
@@ -241,8 +274,16 @@ esp_err_t sticky_display_sleep()
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (s_sleeping) {
+        return ESP_OK;
+    }
+
     ESP_RETURN_ON_ERROR(
         seeed_epaper_panel_sleep(s_panel),
         "sticky_display", "put panel to sleep");
-    return gpio_set_level(static_cast<gpio_num_t>(PIN_EPD_EN), 0);
+    ESP_RETURN_ON_ERROR(
+        gpio_set_level(static_cast<gpio_num_t>(PIN_EPD_EN), 0),
+        "sticky_display", "disable display power");
+    s_sleeping = true;
+    return ESP_OK;
 }

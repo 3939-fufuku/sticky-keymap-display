@@ -6,7 +6,6 @@
 
 class Canvas;
 
-// Loads /sdcard/layer_<n>.png. Mount/decode/unmount is one transaction so the
-// shared SPI bus is released before the e-paper refresh starts.
-esp_err_t sd_keymap_load(uint8_t layer, Canvas &canvas);
-
+// Loads /sdcard/keymaps/<keyboard_id>/layer_<n>.png and falls back to the
+// legacy /sdcard/layer_<n>.png path. Mount/decode/unmount is one transaction.
+esp_err_t sd_keymap_load(const char *keyboard_id, uint8_t layer, Canvas &canvas);

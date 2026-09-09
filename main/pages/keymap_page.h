@@ -6,5 +6,5 @@
 
 class Canvas;
 
-esp_err_t keymap_page_render(Canvas &canvas, uint8_t layer);
-
+esp_err_t keymap_page_render(Canvas &canvas, const char *keyboard_id,
+                             uint8_t layer);

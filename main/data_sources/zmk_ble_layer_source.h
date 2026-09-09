@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 
 #include "layer_source.h"
 
-// NimBLE central that connects to the Nickey ZMK custom GATT service and
+// NimBLE central that connects to a supported ZMK custom GATT service and
 // forwards its one-byte active-layer notifications to the application.
 class ZmkBleLayerSource final : public LayerSource {
 public:
@@ -12,9 +13,11 @@ public:
     uint8_t initial_layer() const override { return current_layer_; }
     int left_battery_percent() const { return left_battery_percent_; }
     int right_battery_percent() const { return right_battery_percent_; }
+    const char *keyboard_id() const { return keyboard_id_; }
 
     void handle_layer(uint8_t layer);
     void handle_batteries(uint8_t left_percent, uint8_t right_percent);
+    void handle_keyboard_id(const char *id, size_t length);
 
 private:
     LayerChangedCallback callback_ = nullptr;
@@ -22,4 +25,5 @@ private:
     volatile uint8_t current_layer_ = 0;
     volatile int left_battery_percent_ = -1;
     volatile int right_battery_percent_ = -1;
+    char keyboard_id_[32] = "default";
 };

@@ -19,7 +19,6 @@ extern "C" void ble_store_config_init(void);
 namespace {
 
 constexpr char kTag[] = "zmk_ble_layer";
-constexpr char kPeerName[] = "nickey";
 constexpr int32_t kScanDurationMs = 8000;
 constexpr uint64_t kScanRetryDelayUs = 12ULL * 1000ULL * 1000ULL;
 
@@ -30,6 +29,21 @@ constexpr uint16_t kConnectionIntervalMin = 80;
 constexpr uint16_t kConnectionIntervalMax = 120;
 constexpr uint16_t kConnectionLatency = 3;
 constexpr uint16_t kSupervisionTimeout = 600;  // 6 seconds, in 10 ms units.
+
+struct SupportedKeyboard {
+    const char *ble_name;
+    const char *keyboard_id;
+};
+
+constexpr SupportedKeyboard kSupportedKeyboards[] = {
+    {"nickey", "nickey44"},
+    {"mona2", "mona2"},
+    {"roBa", "roba"},
+    {"roBa_R", "roba"},
+    {"LiTom", "litom"},
+    {"LiTom_R", "litom"},
+    {"torabo-tsuki", "torabo_tsuki_lp"},
+};
 
 // 3a7d9f10-7d8b-4f2c-9a61-6e7e3c5b1a00
 const ble_uuid128_t kLayerServiceUuid = BLE_UUID128_INIT(
@@ -46,6 +60,11 @@ const ble_uuid128_t kBatteryCharacteristicUuid = BLE_UUID128_INIT(
     0x00, 0x1a, 0x5b, 0x3c, 0x7e, 0x6e, 0x61, 0x9a,
     0x2c, 0x4f, 0x8b, 0x7d, 0x12, 0x9f, 0x7d, 0x3a);
 
+// 3a7d9f13-7d8b-4f2c-9a61-6e7e3c5b1a00
+const ble_uuid128_t kKeyboardIdCharacteristicUuid = BLE_UUID128_INIT(
+    0x00, 0x1a, 0x5b, 0x3c, 0x7e, 0x6e, 0x61, 0x9a,
+    0x2c, 0x4f, 0x8b, 0x7d, 0x13, 0x9f, 0x7d, 0x3a);
+
 const ble_uuid16_t kCccdUuid = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
 
 ZmkBleLayerSource *s_source = nullptr;
@@ -56,11 +75,13 @@ uint16_t s_layer_value_handle = 0;
 uint16_t s_cccd_handle = 0;
 uint16_t s_battery_value_handle = 0;
 uint16_t s_battery_cccd_handle = 0;
+uint16_t s_keyboard_id_value_handle = 0;
 bool s_connecting = false;
 esp_timer_handle_t s_scan_retry_timer = nullptr;
 
 int gap_event(struct ble_gap_event *event, void *arg);
 void discover_battery_characteristic(uint16_t conn_handle);
+void discover_keyboard_id_characteristic(uint16_t conn_handle);
 void start_scan();
 
 void scan_retry_timer_callback(void *arg)
@@ -84,7 +105,7 @@ void schedule_scan_retry()
         ESP_LOGW(kTag, "Cannot schedule BLE scan retry: %s",
                  esp_err_to_name(result));
     } else {
-        ESP_LOGI(kTag, "Nickey not found; retrying scan in 12 seconds");
+        ESP_LOGI(kTag, "Supported keyboard not found; retrying scan in 12 seconds");
     }
 }
 
@@ -113,6 +134,7 @@ void reset_gatt_state()
     s_cccd_handle = 0;
     s_battery_value_handle = 0;
     s_battery_cccd_handle = 0;
+    s_keyboard_id_value_handle = 0;
     s_connecting = false;
 }
 
@@ -142,27 +164,32 @@ void start_scan()
     if (rc != 0 && rc != BLE_HS_EALREADY) {
         ESP_LOGE(kTag, "Cannot start BLE scan: %d", rc);
     } else {
-        ESP_LOGI(kTag, "Scanning for %s for %ld ms", kPeerName,
+        ESP_LOGI(kTag, "Scanning for supported ZMK keyboards for %ld ms",
                  static_cast<long>(kScanDurationMs));
     }
 }
 
-bool is_nickey(const ble_gap_disc_desc &disc)
+const SupportedKeyboard *find_supported_keyboard(const ble_gap_disc_desc &disc)
 {
     if (disc.event_type != BLE_HCI_ADV_RPT_EVTYPE_ADV_IND &&
         disc.event_type != BLE_HCI_ADV_RPT_EVTYPE_DIR_IND) {
-        return false;
+        return nullptr;
     }
 
     ble_hs_adv_fields fields = {};
     if (ble_hs_adv_parse_fields(&fields, disc.data, disc.length_data) != 0 ||
         fields.name == nullptr) {
-        return false;
+        return nullptr;
     }
 
-    const size_t expected = std::strlen(kPeerName);
-    return fields.name_len == expected &&
-           std::memcmp(fields.name, kPeerName, expected) == 0;
+    for (const SupportedKeyboard &keyboard : kSupportedKeyboards) {
+        const size_t expected = std::strlen(keyboard.ble_name);
+        if (fields.name_len == expected &&
+            std::memcmp(fields.name, keyboard.ble_name, expected) == 0) {
+            return &keyboard;
+        }
+    }
+    return nullptr;
 }
 
 void disconnect_with_error(const char *stage, int rc)
@@ -176,19 +203,20 @@ void disconnect_with_error(const char *stage, int rc)
 int on_battery_read(uint16_t conn_handle, const ble_gatt_error *error,
                     ble_gatt_attr *attr, void *arg)
 {
-    (void)conn_handle;
     (void)arg;
     if (error->status == 0 && attr != nullptr && attr->om != nullptr) {
-        // Nickey central is the right half; byte 1 is peripheral (left).
+        // Every keyboard reports bytes as {right, left} regardless of which
+        // physical half is the split central.
         uint8_t levels[2] = {};
         if (OS_MBUF_PKTLEN(attr->om) >= sizeof(levels) &&
             os_mbuf_copydata(attr->om, 0, sizeof(levels), levels) == 0 &&
             s_source != nullptr) {
-            ESP_LOGI(kTag, "Nickey battery: left=%u%% right=%u%%",
+            ESP_LOGI(kTag, "Keyboard battery: left=%u%% right=%u%%",
                      levels[1], levels[0]);
             s_source->handle_batteries(levels[1], levels[0]);
         }
     }
+    discover_keyboard_id_characteristic(conn_handle);
     return 0;
 }
 
@@ -200,12 +228,16 @@ int on_battery_cccd_written(uint16_t conn_handle, const ble_gatt_error *error,
     if (error->status != 0) {
         ESP_LOGW(kTag, "Battery notification subscription failed: %d",
                  error->status);
+        discover_keyboard_id_characteristic(conn_handle);
         return 0;
     }
-    ESP_LOGI(kTag, "Subscribed to Nickey battery notifications");
+    ESP_LOGI(kTag, "Subscribed to keyboard battery notifications");
     const int rc = ble_gattc_read(conn_handle, s_battery_value_handle,
                                   on_battery_read, nullptr);
-    if (rc != 0) ESP_LOGW(kTag, "Battery read start failed: %d", rc);
+    if (rc != 0) {
+        ESP_LOGW(kTag, "Battery read start failed: %d", rc);
+        discover_keyboard_id_characteristic(conn_handle);
+    }
     return 0;
 }
 
@@ -226,7 +258,8 @@ int on_battery_descriptor(uint16_t conn_handle, const ble_gatt_error *error,
         return 0;
     }
     if (error->status == BLE_HS_EDONE && s_battery_cccd_handle == 0) {
-        ESP_LOGW(kTag, "Nickey battery CCCD not found");
+        ESP_LOGW(kTag, "Keyboard battery CCCD not found");
+        discover_keyboard_id_characteristic(conn_handle);
     } else if (error->status != 0 && error->status != BLE_HS_EDONE) {
         ESP_LOGW(kTag, "Battery descriptor discovery failed: %d", error->status);
     }
@@ -246,12 +279,63 @@ int on_battery_characteristic(uint16_t conn_handle, const ble_gatt_error *error,
         return 0;
     }
     if (error->status == BLE_HS_EDONE && s_battery_value_handle == 0) {
-        ESP_LOGW(kTag, "Nickey battery characteristic not found");
+        ESP_LOGW(kTag, "Keyboard battery characteristic not found");
+        discover_keyboard_id_characteristic(conn_handle);
     } else if (error->status != 0 && error->status != BLE_HS_EDONE) {
         ESP_LOGW(kTag, "Battery characteristic discovery failed: %d",
                  error->status);
     }
     return 0;
+}
+
+int on_keyboard_id_read(uint16_t conn_handle, const ble_gatt_error *error,
+                        ble_gatt_attr *attr, void *arg)
+{
+    (void)conn_handle;
+    (void)arg;
+    if (error->status != 0 || attr == nullptr || attr->om == nullptr) {
+        ESP_LOGW(kTag, "Keyboard ID read failed: %d", error->status);
+        return 0;
+    }
+
+    char id[32] = {};
+    const size_t length =
+        OS_MBUF_PKTLEN(attr->om) < sizeof(id) - 1
+            ? OS_MBUF_PKTLEN(attr->om)
+            : sizeof(id) - 1;
+    if (os_mbuf_copydata(attr->om, 0, length, id) == 0 && s_source != nullptr) {
+        ESP_LOGI(kTag, "Keyboard ID: %s", id);
+        s_source->handle_keyboard_id(id, length);
+    }
+    return 0;
+}
+
+int on_keyboard_id_characteristic(uint16_t conn_handle,
+                                  const ble_gatt_error *error,
+                                  const ble_gatt_chr *chr, void *arg)
+{
+    (void)arg;
+    if (error->status == 0 && chr != nullptr &&
+        s_keyboard_id_value_handle == 0) {
+        s_keyboard_id_value_handle = chr->val_handle;
+        const int rc = ble_gattc_read(conn_handle,
+                                      s_keyboard_id_value_handle,
+                                      on_keyboard_id_read, nullptr);
+        if (rc != 0) ESP_LOGW(kTag, "Keyboard ID read start failed: %d", rc);
+    } else if (error->status != 0 && error->status != BLE_HS_EDONE) {
+        ESP_LOGW(kTag, "Keyboard ID discovery failed: %d", error->status);
+    }
+    return 0;
+}
+
+void discover_keyboard_id_characteristic(uint16_t conn_handle)
+{
+    if (s_keyboard_id_value_handle != 0) return;
+    const int rc = ble_gattc_disc_chrs_by_uuid(
+        conn_handle, s_service_start, s_service_end,
+        &kKeyboardIdCharacteristicUuid.u,
+        on_keyboard_id_characteristic, nullptr);
+    if (rc != 0) ESP_LOGW(kTag, "Keyboard ID discovery start failed: %d", rc);
 }
 
 void discover_battery_characteristic(uint16_t conn_handle)
@@ -293,7 +377,7 @@ int on_cccd_written(uint16_t conn_handle, const ble_gatt_error *error,
         return 0;
     }
 
-    ESP_LOGI(kTag, "Subscribed to Nickey layer notifications");
+    ESP_LOGI(kTag, "Subscribed to keyboard layer notifications");
     const int rc = ble_gattc_read(conn_handle, s_layer_value_handle,
                                   on_layer_read, nullptr);
     if (rc != 0) {
@@ -377,7 +461,7 @@ int on_service(uint16_t conn_handle, const ble_gatt_error *error,
         return 0;
     }
     if (s_service_start == 0) {
-        disconnect_with_error("Nickey layer service not found", BLE_HS_ENOENT);
+        disconnect_with_error("Keyboard layer service not found", BLE_HS_ENOENT);
         return 0;
     }
 
@@ -421,7 +505,7 @@ void connect_to(const ble_addr_t &address)
     }
 
     s_connecting = true;
-    ESP_LOGI(kTag, "Found %s; connecting", kPeerName);
+    ESP_LOGI(kTag, "Found supported keyboard; connecting");
     rc = ble_gap_connect(own_addr_type, &address, 30000, nullptr,
                          gap_event, nullptr);
     if (rc != 0) {
@@ -436,7 +520,15 @@ int gap_event(ble_gap_event *event, void *arg)
     (void)arg;
     switch (event->type) {
         case BLE_GAP_EVENT_DISC:
-            if (is_nickey(event->disc)) connect_to(event->disc.addr);
+            if (const SupportedKeyboard *keyboard =
+                    find_supported_keyboard(event->disc)) {
+                if (s_source != nullptr) {
+                    s_source->handle_keyboard_id(
+                        keyboard->keyboard_id,
+                        std::strlen(keyboard->keyboard_id));
+                }
+                connect_to(event->disc.addr);
+            }
             return 0;
 
         case BLE_GAP_EVENT_CONNECT:
@@ -587,7 +679,7 @@ esp_err_t ZmkBleLayerSource::start(LayerChangedCallback callback, void *context)
     ble_store_config_init();
 
     nimble_port_freertos_init(host_task);
-    ESP_LOGI(kTag, "Nickey BLE layer source started");
+    ESP_LOGI(kTag, "Multi-keyboard BLE layer source started");
     return ESP_OK;
 }
 
@@ -611,5 +703,26 @@ void ZmkBleLayerSource::handle_batteries(uint8_t left_percent,
     if (left == left_battery_percent_ && right == right_battery_percent_) return;
     left_battery_percent_ = left;
     right_battery_percent_ = right;
+    if (callback_ != nullptr) callback_(current_layer_, context_);
+}
+
+void ZmkBleLayerSource::handle_keyboard_id(const char *id, size_t length)
+{
+    if (id == nullptr || length == 0) return;
+    if (length >= sizeof(keyboard_id_)) length = sizeof(keyboard_id_) - 1;
+
+    char sanitized[sizeof(keyboard_id_)] = {};
+    size_t output_length = 0;
+    for (size_t i = 0; i < length; ++i) {
+        const char c = id[i];
+        const bool allowed = (c >= 'a' && c <= 'z') ||
+                             (c >= '0' && c <= '9') ||
+                             c == '_' || c == '-';
+        if (!allowed) return;
+        sanitized[output_length++] = c;
+    }
+    if (output_length == 0 ||
+        std::strcmp(keyboard_id_, sanitized) == 0) return;
+    std::memcpy(keyboard_id_, sanitized, output_length + 1);
     if (callback_ != nullptr) callback_(current_layer_, context_);
 }

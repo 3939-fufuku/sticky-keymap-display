@@ -27,8 +27,19 @@ main/
 ## microSDの準備
 
 1. 32GB以下のmicroSDをFAT32でフォーマットします。
-2. `sample-keymaps/` 内のPNG、または自作PNGをカード直下へコピーします。
-3. ファイル名は `layer_0.png`, `layer_1.png`, ...、画像は必ず800×480にします。
+2. カード直下に`keymaps`フォルダを作ります。
+3. キーボードIDごとのフォルダへPNGをコピーします。ファイル名は`layer_0.png`, `layer_1.png`, ...、画像は必ず800×480にします。
+
+```text
+keymaps/
+├── nickey44/
+├── mona2/
+├── roba/
+├── litom/
+└── torabo_tsuki_lp/
+```
+
+従来どおりmicroSD直下に置いた`layer_<番号>.png`は、対応フォルダに画像がない場合の共通フォールバックとして読み込まれます。
 
 RGB/RGBA/グレースケールPNGを受け付け、透明部分は白として扱います。表示時に輝度を黒・濃灰・薄灰・白へ量子化します。UP/DOWNボタンでレイヤー0〜3を移動し、中央ボタンで再読込します。存在しない画像や不正サイズの場合は画面上にエラーを表示します。
 
@@ -58,15 +69,16 @@ esptool.py --chip esp32s3 -p PORT write_flash 0x0 build/merged.bin
 
 `.github/workflows/build.yml` はpush、Pull Request、手動実行でESP-IDF v5.4.4を使ってビルドします。成功後、Actions実行画面のArtifactsから `sticky-keymap-firmware` をダウンロードできます。中には `merged.bin`、個別bin、`flasher_args.json`、`flash_args` が含まれます。
 
-## Nickey44とのBLE接続
+## 対応ZMKキーボードとのBLE接続
 
-起動後、NimBLE centralがデバイス名 `nickey` を検索して接続します。接続はJust Works方式で暗号化・ボンディングされ、次のカスタムGATT CharacteristicをRead/Notify購読します。
+起動後、NimBLE centralがNickey44、moNa2、roBa、LiTom、torabo tsuki lpを検索して1台へ接続します。接続はJust Works方式で暗号化・ボンディングされ、カスタムGATT CharacteristicからKeyboard ID、レイヤー、左右電池残量を取得します。
 
 - Service: `3a7d9f10-7d8b-4f2c-9a61-6e7e3c5b1a00`
 - Characteristic: `3a7d9f11-7d8b-4f2c-9a61-6e7e3c5b1a00`
 - Payload: アクティブレイヤー番号を表す符号なし1バイト
+- Keyboard ID: `3a7d9f13-7d8b-4f2c-9a61-6e7e3c5b1a00`
 
-通知を受けると `layer_<番号>.png` を表示します。切断後は8秒間スキャンし、見つからない場合は12秒休止して再試行します。BLE接続前やトラブル時も本体ボタンで手動切替できます。
+通知を受けると `keymaps/<Keyboard ID>/layer_<番号>.png` を表示します。切断後は8秒間スキャンし、見つからない場合は12秒休止して再試行します。BLE接続前やトラブル時も本体ボタンで手動切替できます。
 
 > ZMK v0.3.0は通常、アクティブなBLEプロファイル1台へ接続します。Nickey44をPCへBLE接続中はStickyが同時接続できない場合があります。まずPC側Bluetoothを切ってStickyとの接続・通知を確認してください。PCとStickyの完全同時利用には、今後Nickey側を接続不要の広告通知方式へ変更する必要があります。
 

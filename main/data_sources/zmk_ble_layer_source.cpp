@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
 #include "host/ble_hs.h"
@@ -19,6 +20,16 @@ namespace {
 
 constexpr char kTag[] = "zmk_ble_layer";
 constexpr char kPeerName[] = "nickey";
+constexpr int32_t kScanDurationMs = 8000;
+constexpr uint64_t kScanRetryDelayUs = 12ULL * 1000ULL * 1000ULL;
+
+// Connection interval units are 1.25 ms. This requests 100-150 ms and permits
+// three skipped peripheral events, keeping notification latency below roughly
+// 600 ms while substantially reducing BLE wakeups.
+constexpr uint16_t kConnectionIntervalMin = 80;
+constexpr uint16_t kConnectionIntervalMax = 120;
+constexpr uint16_t kConnectionLatency = 3;
+constexpr uint16_t kSupervisionTimeout = 600;  // 6 seconds, in 10 ms units.
 
 // 3a7d9f10-7d8b-4f2c-9a61-6e7e3c5b1a00
 const ble_uuid128_t kLayerServiceUuid = BLE_UUID128_INIT(
@@ -46,9 +57,52 @@ uint16_t s_cccd_handle = 0;
 uint16_t s_battery_value_handle = 0;
 uint16_t s_battery_cccd_handle = 0;
 bool s_connecting = false;
+esp_timer_handle_t s_scan_retry_timer = nullptr;
 
 int gap_event(struct ble_gap_event *event, void *arg);
 void discover_battery_characteristic(uint16_t conn_handle);
+void start_scan();
+
+void scan_retry_timer_callback(void *arg)
+{
+    (void)arg;
+    start_scan();
+}
+
+void schedule_scan_retry()
+{
+    if (s_scan_retry_timer == nullptr || s_connecting ||
+        s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        return;
+    }
+    if (esp_timer_is_active(s_scan_retry_timer)) {
+        return;
+    }
+    const esp_err_t result =
+        esp_timer_start_once(s_scan_retry_timer, kScanRetryDelayUs);
+    if (result != ESP_OK) {
+        ESP_LOGW(kTag, "Cannot schedule BLE scan retry: %s",
+                 esp_err_to_name(result));
+    } else {
+        ESP_LOGI(kTag, "Nickey not found; retrying scan in 12 seconds");
+    }
+}
+
+void request_low_power_connection(uint16_t conn_handle)
+{
+    ble_gap_upd_params params = {};
+    params.itvl_min = kConnectionIntervalMin;
+    params.itvl_max = kConnectionIntervalMax;
+    params.latency = kConnectionLatency;
+    params.supervision_timeout = kSupervisionTimeout;
+
+    const int rc = ble_gap_update_params(conn_handle, &params);
+    if (rc != 0) {
+        ESP_LOGW(kTag, "Low-power connection request failed: %d", rc);
+    } else {
+        ESP_LOGI(kTag, "Requested low-power BLE connection interval");
+    }
+}
 
 void reset_gatt_state()
 {
@@ -64,10 +118,16 @@ void reset_gatt_state()
 
 void start_scan()
 {
+    if (s_connecting || s_conn_handle != BLE_HS_CONN_HANDLE_NONE ||
+        ble_gap_disc_active()) {
+        return;
+    }
+
     uint8_t own_addr_type = 0;
     int rc = ble_hs_id_infer_auto(0, &own_addr_type);
     if (rc != 0) {
         ESP_LOGE(kTag, "Cannot infer BLE address type: %d", rc);
+        schedule_scan_retry();
         return;
     }
 
@@ -77,11 +137,13 @@ void start_scan()
     params.filter_policy = 0;
     params.limited = 0;
 
-    rc = ble_gap_disc(own_addr_type, BLE_HS_FOREVER, &params, gap_event, nullptr);
+    rc = ble_gap_disc(own_addr_type, kScanDurationMs, &params,
+                      gap_event, nullptr);
     if (rc != 0 && rc != BLE_HS_EALREADY) {
         ESP_LOGE(kTag, "Cannot start BLE scan: %d", rc);
     } else {
-        ESP_LOGI(kTag, "Scanning for %s", kPeerName);
+        ESP_LOGI(kTag, "Scanning for %s for %ld ms", kPeerName,
+                 static_cast<long>(kScanDurationMs));
     }
 }
 
@@ -365,7 +427,7 @@ void connect_to(const ble_addr_t &address)
     if (rc != 0) {
         s_connecting = false;
         ESP_LOGE(kTag, "Connection start failed: %d", rc);
-        start_scan();
+        schedule_scan_retry();
     }
 }
 
@@ -382,11 +444,12 @@ int gap_event(ble_gap_event *event, void *arg)
             if (event->connect.status != 0) {
                 ESP_LOGW(kTag, "Connection failed: %d", event->connect.status);
                 reset_gatt_state();
-                start_scan();
+                schedule_scan_retry();
                 return 0;
             }
             s_conn_handle = event->connect.conn_handle;
             ESP_LOGI(kTag, "Connected; securing link");
+            request_low_power_connection(s_conn_handle);
             if (ble_gap_security_initiate(s_conn_handle) != 0) {
                 // A previously bonded link may already be encrypted. Discovery
                 // is safe here; encrypted attributes will reject access if not.
@@ -431,7 +494,7 @@ int gap_event(ble_gap_event *event, void *arg)
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGW(kTag, "Disconnected: %d", event->disconnect.reason);
             reset_gatt_state();
-            start_scan();
+            schedule_scan_retry();
             return 0;
 
         case BLE_GAP_EVENT_REPEAT_PAIRING: {
@@ -444,7 +507,7 @@ int gap_event(ble_gap_event *event, void *arg)
 
         case BLE_GAP_EVENT_DISC_COMPLETE:
             if (!s_connecting && s_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
-                start_scan();
+                schedule_scan_retry();
             }
             return 0;
 
@@ -486,6 +549,22 @@ esp_err_t ZmkBleLayerSource::start(LayerChangedCallback callback, void *context)
     callback_ = callback;
     context_ = context;
     s_source = this;
+
+    if (s_scan_retry_timer == nullptr) {
+        const esp_timer_create_args_t timer_args = {
+            .callback = scan_retry_timer_callback,
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "nickey_scan_retry",
+            .skip_unhandled_events = true,
+        };
+        const esp_err_t timer_result =
+            esp_timer_create(&timer_args, &s_scan_retry_timer);
+        if (timer_result != ESP_OK) {
+            s_source = nullptr;
+            return timer_result;
+        }
+    }
 
     esp_err_t result = nvs_flash_init();
     if (result == ESP_ERR_NVS_NO_FREE_PAGES ||

@@ -16,6 +16,7 @@
 namespace {
 constexpr char kTag[] = "sticky_keymap";
 constexpr uint8_t kMaxLayer = 3;
+constexpr TickType_t kAutoDeepSleepTimeout = pdMS_TO_TICKS(5 * 60 * 1000);
 
 void layer_changed(uint8_t layer, void *context)
 {
@@ -80,7 +81,11 @@ extern "C" void app_main()
 
     while (true) {
         AppEvent event;
-        if (!app_event_wait(event, portMAX_DELAY)) continue;
+        if (!app_event_wait(event, kAutoDeepSleepTimeout)) {
+            ESP_LOGI(kTag, "No activity for 5 minutes; entering deep sleep");
+            ESP_ERROR_CHECK(sticky_display_sleep());
+            sticky_power_enter_deep_sleep();
+        }
         switch (event.type) {
             case AppEventType::PreviousPage:
                 current_layer = current_layer == 0 ? kMaxLayer : current_layer - 1;

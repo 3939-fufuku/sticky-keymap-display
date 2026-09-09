@@ -36,9 +36,7 @@ esp_err_t create_button(int gpio,
     button_gpio_config_t gpio_config = {};
     gpio_config.gpio_num = gpio;
     gpio_config.active_level = 0;
-    // Wake the button timer from a GPIO edge instead of polling all three
-    // switches continuously while Sticky is idle.
-    gpio_config.enable_power_save = true;
+    gpio_config.enable_power_save = false;
     gpio_config.disable_pull = false;
 
     esp_err_t result =

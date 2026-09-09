@@ -9,7 +9,6 @@
 #include "sticky_buttons.h"
 #include "sticky_battery.h"
 #include "sticky_display.h"
-#include "sticky_power.h"
 #include "sticky_sdcard.h"
 #include "zmk_ble_layer_source.h"
 
@@ -62,7 +61,6 @@ extern "C" void app_main()
 {
     ESP_LOGI(kTag, "Starting reTerminal Sticky SD keymap display");
     ESP_ERROR_CHECK(board_init());
-    sticky_power_log_wakeup_reason();
     ESP_ERROR_CHECK(sticky_display_init());
     ESP_ERROR_CHECK(sticky_sdcard_init());
     ESP_ERROR_CHECK(app_event_init());
@@ -102,11 +100,6 @@ extern "C" void app_main()
                     show_layer(*canvas, current_layer, layer_source.left_battery_percent(),
                                layer_source.right_battery_percent());
                 }
-                break;
-            case AppEventType::EnterDeepSleep:
-                ESP_LOGI(kTag, "Power button held; entering deep sleep");
-                ESP_ERROR_CHECK(sticky_display_sleep());
-                sticky_power_enter_deep_sleep();
                 break;
             default:
                 break;

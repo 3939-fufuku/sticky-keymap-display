@@ -9,7 +9,6 @@ idf_component_register(
         "devices/sticky_buttons.cpp"
         "devices/sticky_battery.cpp"
         "devices/sticky_display.cpp"
-        "devices/sticky_power.cpp"
         "devices/sticky_sdcard.cpp"
         "pages/keymap_page.cpp"
         "ui/canvas.cpp"
@@ -17,6 +16,6 @@ idf_component_register(
     INCLUDE_DIRS "." "app" "board" "data_sources" "devices" "pages" "ui"
     REQUIRES
         bt nvs_flash
-        esp_driver_gpio esp_driver_i2c esp_driver_spi esp_hw_support esp_timer
+        esp_driver_gpio esp_driver_i2c esp_driver_spi esp_hw_support
         button fatfs libpng sdmmc seeed_epaper
 )

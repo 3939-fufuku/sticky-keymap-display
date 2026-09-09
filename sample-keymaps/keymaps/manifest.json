@@ -1,0 +1,117 @@
+{
+  "generatedAt": "2026-09-09T12:54:50.322Z",
+  "keyboards": {
+    "mona2": [
+      {
+        "index": 0,
+        "name": "default"
+      },
+      {
+        "index": 1,
+        "name": "1"
+      },
+      {
+        "index": 2,
+        "name": "2"
+      },
+      {
+        "index": 3,
+        "name": "3"
+      },
+      {
+        "index": 4,
+        "name": "4"
+      },
+      {
+        "index": 5,
+        "name": "5"
+      },
+      {
+        "index": 6,
+        "name": "6"
+      }
+    ],
+    "roba": [
+      {
+        "index": 0,
+        "name": "default"
+      },
+      {
+        "index": 1,
+        "name": "FUNCTION"
+      },
+      {
+        "index": 2,
+        "name": "NUM"
+      },
+      {
+        "index": 3,
+        "name": "ARROW"
+      },
+      {
+        "index": 4,
+        "name": "MOUSE"
+      },
+      {
+        "index": 5,
+        "name": "SCROLL"
+      },
+      {
+        "index": 6,
+        "name": "6"
+      }
+    ],
+    "litom": [
+      {
+        "index": 0,
+        "name": "default_layer"
+      },
+      {
+        "index": 1,
+        "name": "MOUSE"
+      },
+      {
+        "index": 2,
+        "name": "SCROLL"
+      },
+      {
+        "index": 3,
+        "name": "ARROW"
+      },
+      {
+        "index": 4,
+        "name": "NUM"
+      },
+      {
+        "index": 5,
+        "name": "FUNCTION"
+      },
+      {
+        "index": 6,
+        "name": "BT"
+      }
+    ],
+    "torabo_tsuki_lp": [
+      {
+        "index": 0,
+        "name": "layer_0"
+      },
+      {
+        "index": 1,
+        "name": "layer_1"
+      },
+      {
+        "index": 2,
+        "name": "layer_2"
+      },
+      {
+        "index": 3,
+        "name": "layer_3"
+      },
+      {
+        "index": 4,
+        "name": "layer_4"
+      }
+    ]
+  }
+}
